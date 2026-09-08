@@ -1,7 +1,6 @@
 from functools import cached_property
 from contextlib import asynccontextmanager
-from psycopg import AsyncConnection
-from psycopg_pool import AsyncConnectionPool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.repositories.pdf_repository import PDFRepository
 from app.db.repositories.converted_page_repository import ConvertedPageRepository
@@ -17,63 +16,52 @@ class LazyWorkContext:
     """
     Registry for database repositories.
     
-    Uses Just-In-Time (JIT) instantiation via @cached_property to ensure
+    Uses (fancy) Just-In-Time (JIT) instantiation via @cached_property to ensure
     high-concurrency workers only allocate memory/CPU for the specific 
-    repositories they require during a transaction.
+    repositories they require during a transaction. (ChatGPT likes this)
     """
 
-    def __init__(self, conn: AsyncConnection) -> None:
-        self.conn = conn
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 
     @cached_property
     def pdfs(self) -> PDFRepository:
-        return PDFRepository(self.conn)
+        return PDFRepository(self.session)
 
     @cached_property
     def pages(self) -> ConvertedPageRepository:
-        return ConvertedPageRepository(self.conn)
+        return ConvertedPageRepository(self.session)
 
     @cached_property
     def converted_pdfs(self) -> ConvertedPDFRepository:
-        return ConvertedPDFRepository(self.conn)
+        return ConvertedPDFRepository(self.session)
 
     @cached_property
     def configs(self) -> ConfigRepository:
-        return ConfigRepository(self.conn)
+        return ConfigRepository(self.session)
 
     @cached_property
     def indexed_pdfs(self) -> PdfPipelineRepository:
-        return PdfPipelineRepository(self.conn)
+        return PdfPipelineRepository(self.session)
 
     @cached_property
     def chunks(self) -> ChunkRepository:
-        return ChunkRepository(self.conn)
+        return ChunkRepository(self.session)
 
     @cached_property
     def embeddings(self) -> EmbeddingRepository:
-        return EmbeddingRepository(self.conn)
+        return EmbeddingRepository(self.session)
 
     @cached_property
     def retrieval(self) -> RetrievalRepository:
-        return RetrievalRepository(self.conn)
+        return RetrievalRepository(self.session)
 
 
 @asynccontextmanager
-async def unit_of_work(pool: AsyncConnectionPool):
+async def unit_of_work(session_factory: async_sessionmaker[AsyncSession]):
     """
-    Manages connection lifecycle and transaction scope.
-    Guarantees the connection is returned to the pool regardless of errors.
+    Yields a LazyWorkContext wrapped in an SQLAlchemy transaction.
     """
-    # 1. Use the pool's native context manager for guaranteed safety -> it has a `finally: self.putconn(conn)`
-    async with pool.connection() as conn:
-        try:
-            # 2. Yield the registry with the injected connection
-            yield LazyWorkContext(conn)
-            
-            # 3. If no exceptions occur in the caller's block, commit
-            await conn.commit()
-            
-        except Exception:
-            # 4. If any error happens, rollback to ensure atomicity
-            await conn.rollback()
-            raise
+    async with session_factory() as session:
+        async with session.begin(): # This automatically handles commit/rollback
+            yield LazyWorkContext(session)

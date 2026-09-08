@@ -49,6 +49,6 @@ async def uow(setup_database) -> AsyncGenerator[LazyWorkContext, None]:
     Yields the LazyWorkContext registry for testing repositories.
     Requires `setup_database` to ensure the pool and schema exist first.
     """
-    async with unit_of_work(setup_database.pool) as uow:
+    async with unit_of_work(setup_database.session_factory) as uow:
         yield uow
         

@@ -18,7 +18,7 @@ class DBConfig(BaseSettings):
     
     @property
     def db_url(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
 
 
 class DoclingConfig(BaseSettings):

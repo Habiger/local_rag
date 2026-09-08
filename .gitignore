@@ -18,7 +18,7 @@ wheels/
 .env 
 
 model_files/*
-.VSCodeCounter
+.VSCodeCounter/
 
 # this is the place where the pdf files are beeing stored in the application
 app/data/*

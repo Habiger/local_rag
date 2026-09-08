@@ -1,128 +1,81 @@
-from app.db.base_repository import BaseRepository
+from sqlalchemy import select, update, exists, func
+from sqlalchemy.dialects.postgresql import insert
 from app.schema.enums import PDFConversionStatus
+from app.db.models import PdfModel
+from app.db.base_repository import BaseRepository
 
 class PDFRepository(BaseRepository):
 
     async def insert(self, pdf_name: str, original_path: str, page_count: int) -> None:
-        await self.execute(
-            """
-            INSERT INTO pdf
-            (
-                pdf_name,
-                original_path,
-                page_count,
-                status
-            )
-            VALUES (%s,%s,%s,%s)
-            ON CONFLICT (pdf_name)
-            DO NOTHING
-            """,
-            (
-                pdf_name,
-                original_path, # New column mapped here
-                page_count,
-                PDFConversionStatus.UPLOADED.value,
-            ),
-        )
+        stmt = insert(PdfModel).values(
+            pdf_name=pdf_name,
+            original_path=original_path,
+            page_count=page_count,
+            status=PDFConversionStatus.UPLOADED.value,
+        ).on_conflict_do_nothing(index_elements=['pdf_name'])
+        
+        await self.session.execute(stmt)
 
-    # NEW: Fetch all records to build the frontend FileTree
     async def get_all_for_tree(self) -> list[dict]:
-        rows = await self.fetchall(
-            """
-            SELECT pdf_name, original_path
-            FROM pdf
-            """
-        )
-        return [{"pdf_name": r["pdf_name"], "original_path": r["original_path"]} for r in rows]
-
+        stmt = select(PdfModel.pdf_name, PdfModel.original_path)
+        result = await self.session.execute(stmt)
+        # result.mappings().all() returns a list of row-like dicts
+        return [{"pdf_name": row.pdf_name, "original_path": row.original_path} 
+                for row in result.mappings().all()]
 
     async def exists(self, pdf_name: str) -> bool:
-        row = await self.fetchone(
-            """
-            SELECT 1
-            FROM pdf
-            WHERE pdf_name=%s
-            """,
-            (pdf_name,),
-        )
-        return row is not None
+        stmt = select(exists().where(PdfModel.pdf_name == pdf_name))
+        result = await self.session.execute(stmt)
+        res_val = result.scalar()
+        
+        return res_val if res_val is not None else False
 
     async def get_status(self, pdf_name: str) -> PDFConversionStatus | None:
-        row = await self.fetchone(
-            """
-            SELECT status
-            FROM pdf
-            WHERE pdf_name=%s
-            """,
-            (pdf_name,),
-        )
-
-        if not row:
+        stmt = select(PdfModel.status).where(PdfModel.pdf_name == pdf_name)
+        result = await self.session.execute(stmt)
+        status_value = result.scalar_one_or_none()
+        
+        if status_value is None:
             return None
+        return PDFConversionStatus(status_value)
 
-        return PDFConversionStatus(row["status"])
-
-    async def update_status(
-        self,
-        pdf_name: str,
-        status: PDFConversionStatus,
-    ) -> None:
-        await self.execute(
-            """
-            UPDATE pdf
-            SET
-                status=%s,
-                last_status_update=NOW()
-            WHERE pdf_name=%s
-            """,
-            (
-                status.value,
-                pdf_name,
-            ),
+    async def update_status(self, pdf_name: str, status: PDFConversionStatus) -> None:
+        stmt = update(PdfModel).where(
+            PdfModel.pdf_name == pdf_name
+        ).values(
+            status=status.value
         )
+        await self.session.execute(stmt)
 
-    async def get_by_status(
-        self,
-        status: PDFConversionStatus,
-        limit: int = 100,
-    ) -> list[str]:
-        rows = await self.fetchall(
-            """
-            SELECT pdf_name
-            FROM pdf
-            WHERE status=%s
-            LIMIT %s
-            """,
-            (
-                status.value,
-                limit,
-            ),
-        )
-        return [r["pdf_name"] for r in rows]
+    async def get_by_status(self, status: PDFConversionStatus, limit: int = 100) -> list[str]:
+        stmt = select(PdfModel.pdf_name).where(
+            PdfModel.status == status.value
+        ).limit(limit)
+        
+        result = await self.session.scalars(stmt)
+        return list(result.all())
 
     async def claim(
         self,
         from_status: PDFConversionStatus,
         to_status: PDFConversionStatus,
     ) -> str | None:
-        row = await self.fetchone(
-            """
-            WITH cte AS (
-                SELECT pdf_name
-                FROM pdf
-                WHERE status=%s
-                FOR UPDATE SKIP LOCKED
-                LIMIT 1
-            )
-            UPDATE pdf
-            SET status=%s
-            FROM cte
-            WHERE pdf.pdf_name=cte.pdf_name
-            RETURNING pdf.pdf_name
-            """,
-            (
-                from_status.value,
-                to_status.value,
-            ),
+        # 1. Create the SKIP LOCKED subquery to ensure that multiple workers don't claim the same pdf twice
+        subq = (
+            select(PdfModel.pdf_name)
+            .where(PdfModel.status == from_status.value)
+            .with_for_update(skip_locked=True)
+            .limit(1)
+            .scalar_subquery()
         )
-        return (row["pdf_name"] if row else None)
+        
+        # 2. Feed it into the UPDATE statement
+        stmt = (
+            update(PdfModel)
+            .where(PdfModel.pdf_name == subq)
+            .values(status=to_status.value)
+            .returning(PdfModel.pdf_name)
+        )
+        
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()

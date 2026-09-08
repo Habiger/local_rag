@@ -1,5 +1,5 @@
+from sqlalchemy import text # <-- Add this import
 import pytest
-from psycopg.rows import dict_row
 
 from app.db.unit_of_work import unit_of_work, LazyWorkContext
 from app.schema.enums import PageConversionTaskStatus
@@ -14,13 +14,19 @@ async def insert_parent_pdf(uow: LazyWorkContext, pdf_name: str, page_count: int
     Helper to satisfy the FOREIGN KEY constraint in converted_page.
     Inserts a dummy PDF record into the DB.
     """
-    await uow.conn.execute(
-        """
+    # Replaced uow.conn.execute with uow.session.execute and added text() wrapper
+    await uow.session.execute(
+        text("""
         INSERT INTO pdf (pdf_name, original_path, page_count, status)
-        VALUES (%s, %s, %s, %s)
+        VALUES (:pdf_name, :original_path, :page_count, :status)
         ON CONFLICT (pdf_name) DO NOTHING;
-        """,
-        (pdf_name, f"/mock/path/to/{pdf_name}", page_count, "PROCESSING")
+        """),
+        {
+            "pdf_name": pdf_name,
+            "original_path": f"/mock/path/to/{pdf_name}",
+            "page_count": page_count,
+            "status": "PROCESSING"
+        }
     )
 
 def create_dummy_conversion_response() -> ConvertDocumentResponse:
@@ -79,9 +85,18 @@ async def test_mark_failed_increments_retry_count_and_updates_status(uow: LazyWo
     await uow.pages.mark_failed(pdf_name, page_number=2, error_message=error_msg_1)
     
     # Assert state via direct DB query to bypass repository filters
-    async with uow.conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute("SELECT retry_count, error_message, status FROM converted_page WHERE pdf_name = %s AND page_number = 2", (pdf_name,))
-        row = await cur.fetchone()
+    # Replaced uow.conn.cursor with uow.session.execute + mapping
+    # Note: Added JOIN since converted_page now uses pdf_id instead of pdf_name
+    result1 = await uow.session.execute(
+        text("""
+        SELECT cp.retry_count, cp.error_message, cp.status 
+        FROM converted_page cp
+        JOIN pdf p ON cp.pdf_id = p.pdf_id
+        WHERE p.pdf_name = :pdf_name AND cp.page_number = 2
+        """),
+        {"pdf_name": pdf_name}
+    )
+    row = result1.mappings().one_or_none()
     
     assert row is not None
     assert row["retry_count"] == 1
@@ -92,9 +107,16 @@ async def test_mark_failed_increments_retry_count_and_updates_status(uow: LazyWo
     error_msg_2 = "OOM Exception"
     await uow.pages.mark_failed(pdf_name, page_number=2, error_message=error_msg_2)
     
-    async with uow.conn.cursor(row_factory=dict_row) as cur:
-        await cur.execute("SELECT retry_count, error_message FROM converted_page WHERE pdf_name = %s AND page_number = 2", (pdf_name,))
-        row2 = await cur.fetchone()
+    result2 = await uow.session.execute(
+        text("""
+        SELECT cp.retry_count, cp.error_message 
+        FROM converted_page cp
+        JOIN pdf p ON cp.pdf_id = p.pdf_id
+        WHERE p.pdf_name = :pdf_name AND cp.page_number = 2
+        """),
+        {"pdf_name": pdf_name}
+    )
+    row2 = result2.mappings().one_or_none()
 
     assert row2 is not None
     assert row2["retry_count"] == 2

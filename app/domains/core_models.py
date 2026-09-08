@@ -23,3 +23,21 @@ class EmbeddedChunk:
     model: EmbeddingModel
     chunk_id: int 
     embedding_vectors: List[float] = field(default_factory=list)
+    
+    
+    def test(self):
+        print(self.chunk_id)
+
+@dataclass
+class Pdf:
+    pdf_name: str
+    page_count: int
+    
+
+@dataclass
+class ConvertedPdf(Pdf):
+    
+
+@dataclass
+class IndexedPdf:
+    
