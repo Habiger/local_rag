@@ -1,5 +1,5 @@
 from psycopg.types.json import Jsonb
-
+from psycopg import sql
 from app.db.base_repository import BaseRepository
 
 from app.schema.enums import EmbeddingTaskStatus
@@ -28,21 +28,23 @@ class ChunkRepository(BaseRepository):
             # ============================================================
             # 1. INSERT CHUNKS
             # ============================================================
-            chunk_rows = [
-                (indexed_pdf_id, c.text)
-                for c in chunks
-            ]
+            # 1. Create a list of safe SQL placeholders
+            placeholder_sql = sql.SQL(", ").join([sql.SQL("(%s, %s)")] * len(chunks))
 
-            await cur.executemany(
-                """
+            # 2. Compose the final query using sql.SQL
+            query = sql.SQL("""
                 INSERT INTO chunk (indexed_pdf_id, chunk_text)
-                VALUES (%s, %s)
+                VALUES {}
                 RETURNING chunk_id
-                """,
-                chunk_rows,
-            )
-            
-            # Default psycopg cursor returns tuples, so chunk_id is at index 0
+            """).format(placeholder_sql)
+
+            # 3. Flatten your parameters
+            chunk_params = []
+            for c in chunks:
+                chunk_params.extend([indexed_pdf_id, c.text])
+
+            # 4. Execute (the linter accepts sql.SQL objects perfectly)
+            await cur.execute(query, chunk_params)
             chunk_ids = [row[0] for row in await cur.fetchall()]
 
             # ============================================================
@@ -71,7 +73,7 @@ class ChunkRepository(BaseRepository):
                         pdf_name,
                         post_processing_config_id,
                         doc_item.self_ref,
-                        Jsonb(doc_item.model_dump_json()), 
+                        Jsonb(doc_item.model_dump()), 
                     ),
                 )
 

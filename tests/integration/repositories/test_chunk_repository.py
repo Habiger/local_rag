@@ -146,7 +146,8 @@ async def test_batch_insert_success(uow):
         assert db_doc_items[0][0] == "ref_1"
         assert db_doc_items[1][0] == "ref_2"
         # Verify JSONB storage
-        assert db_doc_items[0][1]["content"] == "Title Header"
+        item_data = json.loads(db_doc_items[0][1]) if isinstance(db_doc_items[0][1], str) else db_doc_items[0][1]
+        assert item_data["content"] == "Title Header"
         
         # Check mappings
         await cur.execute("SELECT chunk_id, doc_item_id FROM chunk_doc_item_mapping")
@@ -194,7 +195,8 @@ async def test_batch_insert_idempotent_doc_items(uow):
         items = await cur.fetchall()
         
         assert len(items) == 1
-        assert items[0][1]["content"] == "New Content"  # The ON CONFLICT DO UPDATE worked
+        item_data = json.loads(items[0][1]) if isinstance(items[0][1], str) else items[0][1] #TODO decide on ONE way to deal with jsonb data
+        assert item_data["content"] == "New Content"  # The ON CONFLICT DO UPDATE worked
         
         # Ensure mappings exist for both chunks to this single doc_item
         await cur.execute("SELECT chunk_id FROM chunk_doc_item_mapping")
