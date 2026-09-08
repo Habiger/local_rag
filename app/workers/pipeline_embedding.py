@@ -1,11 +1,9 @@
-
 import asyncio
 
 from app.config.settings import llamacpp_config
 from app.config.logging import logger
 
 from app.clients.embedding_client import EmbeddingClient
-
 from app.workers.embedding.producer import chunk_producer
 from app.workers.embedding.consumer import chunk_consumer
 from app.workers.embedding.completion import embedding_completion_worker

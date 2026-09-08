@@ -1,13 +1,13 @@
+"""
+This is just a rudimentary implementation of a simple RAG i haven´t yet 
+updated to work with the current codebase.
+"""
 import asyncio
-import asyncpg
 import sys
 
 from enum import Enum
 from dataclasses import dataclass
 from openai import AsyncOpenAI
-
-# use openai library for llms? vs llamaindex
-# use custom retriever logic vs llamaindex?
 
 from pydantic_ai import Agent, Embedder, RunContext
 from pydantic_ai.providers.openai import OpenAIProvider

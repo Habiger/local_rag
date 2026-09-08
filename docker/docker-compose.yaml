@@ -1,0 +1,111 @@
+
+x-docling-common: &docling-common
+  # The original docling-serve image I previously used was quay.io/docling-project/docling-serve-cu130:v1.16.1
+  # Currently, I use a modified docling-serve variant which enables also the inference of the heading hierarchy (https://github.com/krrome/docling-serve-hierarchical/tree/main)
+  build:
+    context: ../../docling-serve-hierarchical
+    dockerfile: ../docling-serve-hierarchical/Containerfile
+  volumes:
+    - /mnt/nvme_drive1/docling_models:/opt/app-root/src/models
+  environment: &docling-env
+    NVIDIA_VISIBLE_DEVICES: "all"  # overridden per service
+    DOCLING_SERVE_ARTIFACTS_PATH: /opt/app-root/src/models  # all settings available: https://github.com/docling-project/docling-serve/blob/246a2be7a2cb8c2490bc6284603cb77d6e184df6/docling_serve/settings.py#L114
+    DOCLING_SERVE_ENABLE_UI: "true"
+    DOCLING_SERVE_HOST: 0.0.0.0
+    DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
+    DOCLING_SERVE_MAX_SYNC_WAIT: "600"
+    DOCLING_SERVE_ENG_LOC_NUM_WORKERS: "2"
+    DOCLING_SERVE_LOAD_MODELS_AT_BOT: "false"
+    DOCLING_SERVE_ALLOW_CUSTOM_OCR_CONFIG: "true"
+    DOCLING_SERVE_ENG_SHARE_MODELS: "true"
+    DOCLING_NUM_THREADS: "4"
+    UVICORN_WORKERS: "1"
+  networks:
+    - app-net
+  # For non-swarm setups, this is often ignored, but harmless
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+
+  nginx:
+    image: nginx:1.29.8-trixie
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - docling-serve-1
+      - docling-serve-2
+      - docling-serve-3
+    networks:
+      - app-net
+
+  docling-serve-1:
+    <<: *docling-common
+    container_name: docling-serve-1
+    environment:
+      <<: *docling-env
+      DOCLING_DEVICE: "cuda:0"
+
+  docling-serve-2:
+    <<: *docling-common
+    container_name: docling-serve-2
+    environment:
+      <<: *docling-env
+      DOCLING_DEVICE: "cuda:1"
+
+  docling-serve-3:
+    <<: *docling-common
+    container_name: docling-serve-3
+    environment:
+      <<: *docling-env
+      DOCLING_DEVICE: "cuda:2"
+
+  postgres-server:
+    image: pgvector/pgvector:0.8.2-pg18-trixie
+    ports:
+      - ${POSTGRES_HOST_PORT}:5432
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ${POSTGRES_VOLUME_PATH}:/var/lib/postgresql/
+    networks:
+      - app-net
+
+  llama-cpp-server: # https://github.com/cslev/llamacpp-cuda-arm64-docker/tree/main
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    container_name: llama-cpp-server
+    ports:
+      - ${LLAMACPP_PORT}:10001
+    volumes:
+      - ${LLAMA_MODELS_PATH}:/models
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: > # turns following lines into single line for entrypoint of docker image (llama-server)
+      --models-preset /models/models.ini
+      --host 0.0.0.0
+      --port 10001
+      --n-gpu-layers 99
+      --parallel 1
+      --flash-attn on
+      --context-shift
+
+networks:
+  app-net:
