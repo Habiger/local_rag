@@ -3,11 +3,11 @@
 The motivation for this project was two-fold: 
 * Building a fully self-hostable document management system to get my ever growing number of pdfs under control
 * A playground for applying the principles taught in the book *Architecture Patterns with Python - Enabling Test-Driven Development, Domain-Driven Design, and Event-Driven Microservices*[^1]
+> [!NOTE]
+> I paused working on this project after I found out that the [Paperless-ngx](https://github.com/paperless-ngx) project worked on a release[^2] adding RAG capabilities to their already mature document management system, which made my project basically redundant.
 
-`Note`: I paused working on this project after I found out that the [Paperless-ngx](https://github.com/paperless-ngx) project worked on a release[^2] adding RAG capabilities to their already mature document management system, which made my project basically redundant.
-
-[^1] The book is freely accessable at: https://www.cosmicpython.com/book/preface  
-[^2] They introduced AI capabilities with [Paperless-ngx v3.0.0](https://github.com/paperless-ngx/paperless-ngx/releases/tag/v3.0.0) in July 2026.
+[^1]: The book is freely accessable at: https://www.cosmicpython.com/book/preface  
+[^2]: They introduced AI capabilities with [Paperless-ngx v3.0.0](https://github.com/paperless-ngx/paperless-ngx/releases/tag/v3.0.0) in July 2026.
 
 # Overview
 ## Backend, DB and AI/ML Services
